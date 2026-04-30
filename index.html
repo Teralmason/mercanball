@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>MercanBall</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { background: #0a0a0a; color: white; font-family: 'Segoe UI', sans-serif; margin: 0; overflow: hidden; display: flex; height: 100vh; }
+        #sidebar { width: 280px; min-width: 280px; background: #151515; border-right: 4px solid #00ff88; padding: 20px; box-shadow: 10px 0 30px rgba(0,0,0,0.7); z-index: 5; display: flex; flex-direction: column; gap: 15px; box-sizing: border-box; }
+        #game-area { flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle, #1a1a1a 0%, #050505 100%); padding: 20px; box-sizing: border-box; overflow: hidden; }
+        canvas { background: #1b3d1b; border: 5px solid #ffffff11; border-radius: 20px; box-shadow: 0 0 100px rgba(0,255,136,0.1); max-width: 100%; max-height: 80vh; object-fit: contain; }
+        .score-board { font-size: clamp(40px, 5vw, 70px); font-weight: 900; margin-bottom: 10px; display: flex; gap: 40px; font-family: 'Courier New', monospace; }
+        .red-score { color: #ff3333; } .blue-score { color: #33aaff; }
+        .room-tag { background: #00ff88; color: black; padding: 10px; border-radius: 8px; font-weight: bold; text-align: center; }
+        .admin-panel { background: #222; padding: 15px; border-radius: 10px; display: flex; flex-direction: column; gap: 12px; }
+        .score-input-group { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+        .score-input-group input { width: 50px; padding: 5px; background: #333; border: 1px solid #444; color: #00ff88; font-weight: bold; text-align: center; border-radius: 4px; }
+        .admin-btn { background: #444; color: white; border: none; padding: 8px; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 13px; }
+        .player-card { background: #222; padding: 10px; border-radius: 8px; border-left: 5px solid #444; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <h1 style="color:#00ff88; margin:0; font-size: 22px;">MERCANBALL</h1>
+        <div id="room-id" class="room-tag">ODA KODU: ...</div>
+        <div class="admin-panel">
+            <h4 style="margin:0; color:#888;">SKORU AYARLA</h4>
+            <div class="score-input-group">
+                <!-- oninput yaparak anlık tepki vermesini sağladım -->
+                <input type="number" id="manual-red" value="0" oninput="updateManualScore()">
+                <input type="number" id="manual-blue" value="0" oninput="updateManualScore()">
+            </div>
+            <button class="admin-btn" onclick="resetPositions()">Pozisyonları Sıfırla</button>
+        </div>
+        <h3 style="color:#888; font-size: 16px; margin-bottom:5px;">SAHADAKİLER</h3>
+        <div id="player-list"></div>
+    </div>
+
+    <div id="game-area">
+        <div class="score-board">
+            <span class="red-score" id="score-red">0</span>
+            <span style="color:#444;">:</span>
+            <span class="blue-score" id="score-blue">0</span>
+        </div>
+        <canvas id="game"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 1100; canvas.height = 600;
+
+        const shortId = Math.floor(1000 + Math.random() * 9000).toString();
+        const peer = new Peer("mercan-" + shortId);
+        
+        let players = {};
+        let ball = { x: 550, y: 300, dx: 0, dy: 0, radius: 12 };
+        let score = { red: 0, blue: 0 };
+        
+        const KICK_SPEED = 13; 
+        const FRICTION = 0.978; 
+        const field = { left: 50, right: 1050, top: 50, bottom: 550 };
+
+        peer.on('open', () => document.getElementById('room-id').innerText = "ODA: " + shortId);
+
+        peer.on('connection', conn => {
+            conn.on('data', data => {
+                if(data.type === 'join') {
+                    players[conn.peer] = {
+                        nick: data.nick,
+                        number: data.num || "7",
+                        team: Object.keys(players).length % 2 === 0 ? 'red' : 'blue',
+                        x: 0, y: 0, dx: 0, dy: 0, isKicking: false, radius: 22, joinOrder: Date.now()
+                    };
+                    resetPositions();
+                    updatePlayerList();
+                }
+                if(data.type === 'move' && players[conn.peer]) {
+                    players[conn.peer].dx = data.x * 4.2;
+                    players[conn.peer].dy = data.y * 4.2;
+                }
+                if(data.type === 'kick' && players[conn.peer]) {
+                    players[conn.peer].isKicking = data.value;
+                }
+            });
+            conn.on('close', () => { delete players[conn.peer]; updatePlayerList(); });
+        });
+
+        // Skor ayarlama fonksiyonu düzeltildi
+        function updateManualScore() {
+            const redVal = parseInt(document.getElementById('manual-red').value);
+            const blueVal = parseInt(document.getElementById('manual-blue').value);
+            if(!isNaN(redVal)) score.red = redVal;
+            if(!isNaN(blueVal)) score.blue = blueVal;
+        }
+
+        function resetPositions() {
+            ball = { x: 550, y: 300, dx: 0, dy: 0, radius: 12 };
+            let redTeam = Object.values(players).filter(p => p.team === 'red').sort((a,b) => a.joinOrder - b.joinOrder);
+            let blueTeam = Object.values(players).filter(p => p.team === 'blue').sort((a,b) => a.joinOrder - b.joinOrder);
+            const setPos = (teamPlayers, xPos) => {
+                teamPlayers.forEach((p, index) => {
+                    p.x = xPos;
+                    if(index === 0) p.y = 300;
+                    else {
+                        let offset = Math.ceil(index / 2) * 80;
+                        p.y = index % 2 === 1 ? 300 - offset : 300 + offset;
+                    }
+                });
+            };
+            setPos(redTeam, 250);
+            setPos(blueTeam, 850);
+        }
+
+        function updatePlayerList() {
+            const list = document.getElementById('player-list');
+            list.innerHTML = "";
+            for(let id in players) {
+                const p = players[id];
+                list.innerHTML += `<div class="player-card" style="border-left-color:${p.team === 'red' ? '#ff3333' : '#33aaff'}">
+                    <span>#${p.number} <b>${p.nick}</b></span>
+                    <button class="admin-btn" style="padding:2px 5px;" onclick="swapTeam('${id}')">Değiş</button>
+                </div>`;
+            }
+        }
+
+        function swapTeam(id) {
+            players[id].team = players[id].team === 'red' ? 'blue' : 'red';
+            resetPositions();
+            updatePlayerList();
+        }
+
+        function drawField() {
+            ctx.fillStyle = "#1b3d1b";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = "rgba(255,255,255,0.2)"; 
+            ctx.lineWidth = 4;
+            ctx.strokeRect(field.left, field.top, field.right - field.left, field.bottom - field.top);
+            ctx.beginPath(); ctx.moveTo(550, 50); ctx.lineTo(550, 550); ctx.stroke();
+            ctx.beginPath(); ctx.arc(550, 300, 90, 0, Math.PI*2); ctx.stroke();
+            ctx.lineWidth = 10;
+            ctx.strokeStyle = "#ff3333"; ctx.strokeRect(0, 225, 50, 150);
+            ctx.strokeStyle = "#33aaff"; ctx.strokeRect(1050, 225, 50, 150);
+        }
+
+        function loop() {
+            drawField();
+            ball.x += ball.dx; ball.y += ball.dy;
+            ball.dx *= FRICTION; ball.dy *= FRICTION;
+
+            // Skorları tabelaya ve inputlara senkronize et
+            document.getElementById('score-red').innerText = score.red;
+            document.getElementById('score-blue').innerText = score.blue;
+            
+            // Sadece kutuya odaklanılmadığında kutuları güncelle (yazarken silinmesin diye)
+            if(document.activeElement !== document.getElementById('manual-red')) {
+                document.getElementById('manual-red').value = score.red;
+            }
+            if(document.activeElement !== document.getElementById('manual-blue')) {
+                document.getElementById('manual-blue').value = score.blue;
+            }
+
+            if(ball.y > 225 && ball.y < 375) {
+                if(ball.x < 20) { score.blue++; resetPositions(); }
+                if(ball.x > 1080) { score.red++; resetPositions(); }
+            } else {
+                if(ball.x < field.left + ball.radius || ball.x > field.right - ball.radius) ball.dx *= -1.1;
+            }
+            if(ball.y < field.top + ball.radius || ball.y > field.bottom - ball.radius) ball.dy *= -1.1;
+
+            let pIds = Object.keys(players);
+            for(let i = 0; i < pIds.length; i++) {
+                let p = players[pIds[i]];
+                p.x += p.dx; p.y += p.dy;
+                p.x = Math.max(field.left + 25, Math.min(field.right - 25, p.x));
+                p.y = Math.max(field.top + 25, Math.min(field.bottom - 25, p.y));
+
+                for(let j = i + 1; j < pIds.length; j++) {
+                    let p2 = players[pIds[j]];
+                    let d = Math.hypot(p.x - p2.x, p.y - p2.y);
+                    if(d < 44) {
+                        let angle = Math.atan2(p2.y - p.y, p2.x - p.x);
+                        let overlap = 44 - d;
+                        p.x -= Math.cos(angle) * (overlap/2);
+                        p.y -= Math.sin(angle) * (overlap/2);
+                        p2.x += Math.cos(angle) * (overlap/2);
+                        p2.y += Math.sin(angle) * (overlap/2);
+                    }
+                }
+
+                let dist = Math.hypot(p.x - ball.x, p.y - ball.y);
+                if(dist < 45) {
+                    let angle = Math.atan2(ball.y - p.y, ball.x - p.x);
+                    if(p.isKicking) {
+                        ball.dx = Math.cos(angle) * KICK_SPEED;
+                        ball.dy = Math.sin(angle) * KICK_SPEED;
+                        p.isKicking = false;
+                    } else if(dist < 32) {
+                        let overlap = 32 - dist;
+                        ball.x += Math.cos(angle) * overlap;
+                        ball.y += Math.sin(angle) * overlap;
+                        ball.dx = p.dx * 0.85;
+                        ball.dy = p.dy * 0.85;
+                    }
+                }
+
+                ctx.fillStyle = p.team === 'red' ? '#ff3333' : '#33aaff';
+                ctx.beginPath(); ctx.arc(p.x, p.y, 22, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = p.isKicking ? "yellow" : "white"; ctx.lineWidth = 3; ctx.stroke();
+                ctx.fillStyle = "white"; ctx.font = "bold 16px Arial"; ctx.textAlign = "center";
+                ctx.fillText(p.number, p.x, p.y + 6);
+                ctx.font = "12px Arial"; ctx.fillText(p.nick, p.x, p.y - 35);
+            }
+
+            ctx.fillStyle = "white";
+            ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI*2); ctx.fill();
+            requestAnimationFrame(loop);
+        }
+        resetPositions(); loop();
+    </script>
+</body>
+</html>
