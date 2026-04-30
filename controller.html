@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, orientation=landscape">
+    <title>MercanBall Controller</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>
+    <style>
+        body { background: #121212; color: white; font-family: sans-serif; margin: 0; overflow: hidden; touch-action: none; }
+        .login-box { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 10px; }
+        input { padding: 12px; border-radius: 8px; border: 2px solid #333; width: 60%; background: #222; color: white; text-align: center; }
+        .btn-join { background: #00ff88; color: black; font-weight: bold; padding: 15px 40px; border-radius: 10px; border: none; font-size: 18px; }
+        
+        #gamepad { display: none; height: 100vh; width: 100vw; position: relative; }
+        #joystick-zone { position: absolute; left: 0; bottom: 0; width: 50%; height: 100%; }
+        #kick-zone { position: absolute; right: 0; bottom: 0; width: 50%; height: 100%; display: flex; align-items: center; justify-content: center; }
+        
+        /* Yan ekran için vur butonu sağ merkeze yakın */
+        .kick-btn { 
+            width: 140px; height: 140px; background: radial-gradient(circle, #ff4b2b, #cc3a21); 
+            border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+            font-weight: 900; font-size: 28px; border: 6px solid rgba(255,255,255,0.2);
+            box-shadow: 0 10px 30px rgba(255,75,43,0.4);
+            user-select: none; -webkit-user-select: none;
+        }
+        .kick-btn:active { transform: scale(0.9); filter: brightness(1.2); }
+    </style>
+</head>
+<body>
+    <div id="login" class="login-box">
+        <h2 style="color:#00ff88; margin:0;">MERCANBALL</h2>
+        <input type="text" id="nick" placeholder="NİCK">
+        <input type="number" id="num" placeholder="FORMA NO">
+        <input type="number" id="room" placeholder="ODA KODU">
+        <button class="btn-join" onclick="joinGame()">BAĞLAN</button>
+    </div>
+
+    <div id="gamepad">
+        <div id="joystick-zone"></div>
+        <div id="kick-zone">
+            <div class="kick-btn" id="kickBtn">VUR</div>
+        </div>
+    </div>
+
+    <script>
+        const peer = new Peer();
+        let conn;
+
+        function joinGame() {
+            const nick = document.getElementById('nick').value || "Emin";
+            const num = document.getElementById('num').value || "10";
+            const room = document.getElementById('room').value;
+            
+            conn = peer.connect("mercan-" + room);
+            conn.on('open', () => {
+                document.getElementById('login').style.display = 'none';
+                document.getElementById('gamepad').style.display = 'block';
+                conn.send({ type: 'join', nick: nick, num: num });
+                setupControls();
+            });
+        }
+
+        function setupControls() {
+            // Joystick Sol Tarafa
+            nipplejs.create({
+                zone: document.getElementById('joystick-zone'),
+                mode: 'static', position: { left: '25%', bottom: '30%' },
+                color: '#00ff88', size: 130
+            }).on('move', (e, d) => {
+                if(conn && d.vector) conn.send({ type: 'move', x: d.vector.x, y: -d.vector.y });
+            }).on('end', () => conn.send({ type: 'move', x: 0, y: 0 }));
+
+            const btn = document.getElementById('kickBtn');
+            
+            // ŞUT FONKSİYONU
+            const startKick = (e) => { 
+                e.preventDefault(); 
+                if(conn) conn.send({ type: 'kick', value: true }); 
+            };
+            const stopKick = (e) => { 
+                e.preventDefault(); 
+                if(conn) conn.send({ type: 'kick', value: false }); 
+            };
+
+            // Mobil için dokunma
+            btn.addEventListener('touchstart', startKick);
+            btn.addEventListener('touchend', stopKick);
+
+            // PC Testi için tıklama (Mousedown/Up)
+            btn.addEventListener('mousedown', startKick);
+            btn.addEventListener('mouseup', stopKick);
+        }
+    </script>
+</body>
+</html>
